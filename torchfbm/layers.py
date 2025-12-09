@@ -45,11 +45,14 @@ class FBMNoisyLinear(nn.Module):
         else:
             gen_func = generate_davies_harte
             
+        seed_in = self._seed if self._seed is not None else None
+        seed_out = self._seed + 1 if self._seed is not None else None
+
         self.noise_stream_in = gen_func(
-            self.buffer_size, self.H, size=(self.in_features,), device=self.weight_mu.device, dtype=self._dtype, seed=self._seed
+            self.buffer_size, self.H, size=(self.in_features,), device=self.weight_mu.device, dtype=self._dtype, seed=seed_in
         )
         self.noise_stream_out = gen_func(
-            self.buffer_size, self.H, size=(self.out_features,), device=self.weight_mu.device, dtype=self._dtype, seed=self._seed
+            self.buffer_size, self.H, size=(self.out_features,), device=self.weight_mu.device, dtype=self._dtype, seed=seed_out
         )
         self.step_counter = 0
 
@@ -126,3 +129,41 @@ class FractionalPositionalEmbedding(nn.Module):
             raise ValueError(f"Sequence length {seq_len} exceeds max_len {self.pe.size(0)}")
             
         return x + self.pe[:seq_len, :].unsqueeze(0)
+def fractional_init_(tensor: torch.Tensor, H: float = 0.7, std: float = 0.02):
+    """
+    In-place initialization of weights using Fractional Gaussian Noise.
+    Good for breaking I.I.D assumption in time-series models.
+    """
+    with torch.no_grad():
+        rows, cols = tensor.shape
+        total_elements = rows * cols
+        
+        # Generate a long correlated stream
+        fgn = generate_davies_harte(total_elements, H, device=tensor.device)
+        
+        # Normalize and Scale
+        fgn = (fgn - fgn.mean()) / (fgn.std() + 1e-8)
+        fgn = fgn * std
+        
+        tensor.copy_(fgn.view(rows, cols))
+
+class FractionalKernel(nn.Module):
+    """
+    Computes covariance/similarity based on power-law decay.
+    Useful for Attention mechanisms or Gaussian Processes.
+    K(x, y) = ||x - y||^(2H)
+    """
+    def __init__(self, H: float = 0.5):
+        super().__init__()
+        self.H = H
+        
+    def forward(self, x1, x2):
+        # x1: (B, N, D)
+        # x2: (B, M, D)
+        # Compute pairwise distances
+        dist = torch.cdist(x1, x2, p=2) # Euclidean dist
+        
+        # Fractional similarity
+        # We invert it so closer = higher similarity
+        # Kernel = exp( - dist^(2H) )
+        return torch.exp(-torch.pow(dist, 2 * self.H))
