@@ -48,7 +48,7 @@ pip install -e .
 
 ---
 
-## ⚡ Quick Usage
+## Quick Usage
 
 ### 1. Generate Rough Paths
 Generate fractional noise on CUDA using the fast Davies-Harte method.
