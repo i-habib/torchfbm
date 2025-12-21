@@ -261,3 +261,21 @@ def fractional_brownian_bridge(
     bridge = free_path - correction + start_val
     
     return bridge.cpu().numpy() if return_numpy else bridge
+
+def multifractal_random_walk(n, H, lambda_sq=0.02, device='cpu'):
+    """
+    Simulates MRW.
+    lambda_sq: Intermittency coefficient (higher = more flash crashes).
+    """
+    # 1. Generate fGn for the volatility cone (omega)
+    # The correlation of omega is logarithmic
+    # This is complex to do perfectly, but a proxy is:
+    omega = generate_davies_harte(n, H, device=device) 
+    
+    # 2. Stochastic Volatility
+    sigma = torch.exp(lambda_sq * omega)
+    
+    # 3. The Walk
+    noise = torch.randn(n, device=device)
+    mrw = torch.cumsum(sigma * noise, dim=-1)
+    return mrw

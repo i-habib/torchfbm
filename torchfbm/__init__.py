@@ -33,8 +33,10 @@ from .processes import (
 	fractional_ou_process, 
 	geometric_fbm, 
 	reflected_fbm, 
-	fractional_brownian_bridge
+	fractional_brownian_bridge,
+	multifractal_random_walk
 )
+from .dfa import dfa
 from .layers import (
 	FBMNoisyLinear, 
 	FractionalPositionalEmbedding, 
@@ -55,11 +57,11 @@ __all__ = [
 	# Generators
 	'fbm', 'generate_davies_harte', 'generate_cholesky',
 	# Processes
-	'fractional_ou_process', 'geometric_fbm', 'reflected_fbm', 'fractional_brownian_bridge',
+	'fractional_ou_process', 'geometric_fbm', 'reflected_fbm', 'fractional_brownian_bridge', 'multifractal_random_walk',
 	# Neural layers
 	'FBMNoisyLinear', 'FractionalPositionalEmbedding', 'FractionalKernel', 'fractional_init_',
 	# Analysis
-	'covariance_matrix', 'plot_acf', 'spectral_scaling_factor',
+	'covariance_matrix', 'plot_acf', 'spectral_scaling_factor', 'dfa',
 	# Transforms
 	'fractional_diff', 'fractional_integrate',
 	# Estimators

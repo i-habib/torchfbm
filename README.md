@@ -23,6 +23,7 @@ Designed for **Quantitative Finance** (Rough Volatility, Real-Time Streaming), *
 ### **Quantitative Finance**
 *   **Rough Processes:** `fractional_ou_process` (Fractional Ornstein-Uhlenbeck) for volatility modeling.
 *   **Asset Pricing:** `geometric_fbm` for simulating asset paths with long memory.
+*   **Multifractal Models:** `multifractal_random_walk` (MRW) for intermittent volatility and flash crashes.
 *   **Constraints:** `reflected_fbm` and `fractional_brownian_bridge` for boundary-constrained modeling and data imputation.
 *   **Stationarity:** `fractional_diff` (FracDiff) for making financial time series stationary while preserving memory.
 
@@ -108,13 +109,16 @@ for t in reversed(range(1000)):
 ```
 
 ### 5. Financial Processes
-Simulate Geometric fBm (Stock Prices) and Fractional OU (Volatility).
+Simulate Geometric fBm (Stock Prices), Fractional OU (Volatility), and Multifractal Random Walk.
 
 ```python
-from torchfbm import geometric_fbm, fractional_ou_process
+from torchfbm import geometric_fbm, fractional_ou_process, multifractal_random_walk
 
 # Stock Price Simulation
 s = geometric_fbm(n=1000, H=0.7, mu=0.05, sigma=0.2, s0=100.0, device=device)
+
+# Multifractal Random Walk (Intermittent Volatility)
+mrw = multifractal_random_walk(n=1000, H=0.3, lambda_sq=0.02, device=device)
 ```
 
 ---
@@ -122,10 +126,13 @@ s = geometric_fbm(n=1000, H=0.7, mu=0.05, sigma=0.2, s0=100.0, device=device)
 ## Analysis Tools
 
 ```python
-from torchfbm import estimate_hurst, fractional_diff
+from torchfbm import estimate_hurst, fractional_diff, dfa
 
-# Differentiable Hurst Estimation
+# Differentiable Hurst Estimation (Aggregated Variance Method)
 H_est = estimate_hurst(path.unsqueeze(0), min_lag=4, max_lag=64)
+
+# Detrended Fluctuation Analysis (GPU-Accelerated)
+alpha = dfa(path, scales=None, order=1, return_alpha=True)
 
 # Fractional Differentiation (Stationarity + Memory)
 stationary_ts = fractional_diff(path, d=0.4)
