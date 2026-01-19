@@ -44,8 +44,8 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     project_urls={
-        "Bug Reports": "https://github.com/Coder9872/torchfbm/issues",
-        "Source": "https://github.com/Coder9872/torchfbm",
-        "Documentation": "https://github.com/Coder9872/torchfbm/blob/main/README.md",
+        "Bug Reports": "https://github.com/i-habib/torchfbm/issues",
+        "Source": "https://github.com/i-habib/torchfbm",
+        "Documentation": "https://github.com/i-habib/torchfbm/blob/main/README.md",
     },
 )
