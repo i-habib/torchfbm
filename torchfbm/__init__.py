@@ -1,3 +1,19 @@
+"""TorchFBM: High-performance Fractional Brownian Motion toolkit for PyTorch.
+
+This library provides GPU-accelerated generation and analysis of fractional
+Brownian motion (fBm) and fractional Gaussian noise (fGn), with seamless
+PyTorch integration for deep learning applications.
+
+Quick Start:
+    >>> from torchfbm import fbm, estimate_hurst
+    >>> path = fbm(n=1000, H=0.7)
+    >>> H_est = estimate_hurst(path)
+
+Based on Mandelbrot & Van Ness (1968).
+"""
+
+__version__ = "0.3.0"
+
 import torch
 
 

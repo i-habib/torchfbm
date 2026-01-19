@@ -1,3 +1,15 @@
+"""Hurst exponent estimation methods.
+
+This module provides differentiable estimators for the Hurst exponent,
+enabling end-to-end training of models with fBm-related objectives.
+
+Example:
+    >>> from torchfbm import fbm, estimate_hurst
+    >>> path = fbm(n=5000, H=0.7, size=(100,))
+    >>> H_est = estimate_hurst(path)
+    >>> print(f"Estimated H: {H_est.mean():.3f}")  # Should be ~0.7
+"""
+
 import torch
 
 
@@ -8,29 +20,46 @@ def estimate_hurst(
     assume_path: bool = True,
     return_numpy: bool = False,
 ) -> torch.Tensor:
-    """
-    Estimates the Hurst Exponent H of a time series using the Variogram Method.
-    
-    Based on Mandelbrot (1969).
-    Relies on the scaling law: Var(tau) ~ tau^(2H).
+    """Estimate the Hurst exponent using the variogram method.
+
+    Based on Mandelbrot (1969) and the classical rescaled range analysis.
+
+    This method exploits the self-similarity property of fBm. For increments
+    at lag $\\tau$, the variance scales as:
+
+    $$\\text{Var}(B_H(t+\\tau) - B_H(t)) \\propto \\tau^{2H}$$
+
+    Taking logarithms:
+
+    $$\\log(\\text{Var}(\\tau)) = 2H \\cdot \\log(\\tau) + C$$
+
+    The Hurst exponent is estimated via linear regression in log-log space.
+
+    Note:
+        This estimator is differentiable and can be used in loss functions
+        for training neural networks with Hurst-regularized outputs.
 
     Args:
-        x: Time series tensor of shape (Batch, Time). Represents the path (fBm) or increments (fGn).
-        min_lag, max_lag: Range of time lags to include in the regression.
-        assume_path: If True, assumes `x` is the fBm path.
-                     If False, assumes `x` is fractional Gaussian noise (fGn).
-        return_numpy: If True, returns a numpy array instead of a torch Tensor.
+        x: Input time series of shape `(batch, time)` or `(time,)`.
+        min_lag: Minimum lag for variance estimation.
+        max_lag: Maximum lag for variance estimation.
+        assume_path: If True, treats `x` as fBm path (default).
+            If False, treats `x` as fGn (increments) and integrates first.
+        return_numpy: If True, returns NumPy array instead of torch.Tensor.
 
     Returns:
-        H: Estimated Hurst parameter for each batch element.
+        Estimated Hurst exponent(s) clamped to $[0.01, 0.99]$.
+        Shape is `(batch,)` or scalar for 1D input.
+
+    Example:
+        >>> path = fbm(n=5000, H=0.8, size=(50,), seed=42)
+        >>> H_est = estimate_hurst(path, min_lag=2, max_lag=50)
+        >>> assert abs(H_est.mean() - 0.8) < 0.1  # Should be close to 0.8
     """
-    # Ensure x is variance-normalized for stability
+    # Normalize to zero mean, unit variance for numerical stability
     x = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6)
 
-    # Calculate cumulative sum (the integral of the path)
-    # If input is noise (fGn), we integrate to get profile.
-    # If input is already path (fBm), we skip.
-    # Here assuming input is the Path (fBm) unless assume_path=False.
+    # Integrate fGn to fBm path if needed
     if not assume_path:
         x = torch.cumsum(x, dim=-1)
 
@@ -38,9 +67,7 @@ def estimate_hurst(
     variances = []
 
     for lag in lags:
-        # Vectorized aggregation: X(t+tau) - X(t)
-        # This computes the variance of increments at scale 'lag'
-        # Var(|dX_tau|) ~ tau^(2H)
+        # Compute increment variance at each scale
         if x.size(-1) <= lag:
             break
         increments = x[..., lag:] - x[..., :-lag]
@@ -50,15 +77,13 @@ def estimate_hurst(
     # Stack variances: Shape (Num_Lags, Batch)
     variances = torch.stack(variances, dim=0)
 
-    # Linear Regression in Log-Log space
-    # log(Var) = 2H * log(lag) + C
+    # Log-log regression: log(Var) = 2H * log(lag) + C
     y = torch.log(variances + 1e-8)
     X = (
         torch.log(lags[: variances.size(0)].float()).unsqueeze(1).expand(-1, x.shape[0])
     )  # (Num_Lags, Batch)
 
-    # Simple Least Squares to find slope
-    # Slope = Cov(X, Y) / Var(X)
+    # Least squares slope estimation
     X_mean = X.mean(dim=0)
     y_mean = y.mean(dim=0)
 

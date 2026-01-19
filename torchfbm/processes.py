@@ -1,3 +1,24 @@
+"""Stochastic processes driven by fractional Brownian motion.
+
+This module provides implementations of various stochastic processes that
+incorporate fractional Brownian motion as the driving noise, enabling
+simulation of systems with long-range dependence and anomalous diffusion.
+
+Processes Included:
+    - **Fractional Ornstein-Uhlenbeck**: Mean-reverting process with memory
+    - **Geometric fBm**: Asset price model with long-range dependence
+    - **Reflected fBm**: Bounded fBm with reflection barriers
+    - **Fractional Brownian Bridge**: fBm conditioned on endpoint
+    - **Multifractal Random Walk**: Volatility clustering model
+
+Example:
+    >>> from torchfbm.processes import fractional_ou_process, geometric_fbm
+    >>> # Mean-reverting process with memory
+    >>> ou = fractional_ou_process(1000, H=0.7, theta=0.5, mu=0.0)
+    >>> # Asset prices with long-range dependence
+    >>> prices = geometric_fbm(252, H=0.6, mu=0.05, sigma=0.2, s0=100)
+"""
+
 import torch
 from .generators import generate_davies_harte, generate_cholesky, fbm
 
@@ -15,39 +36,69 @@ def fractional_ou_process(
     dtype: torch.dtype = torch.float32,
     return_numpy: bool = False,
 ):
-    """
-    Simulates a Fractional Ornstein-Uhlenbeck (fOU) process.
-    
-    Based on Cheridito et al. (2003).
-    Equation: dX_t = theta * (mu - X_t) * dt + sigma * dB_H(t)
+    """Simulate a Fractional Ornstein-Uhlenbeck (fOU) process.
+
+    Based on Cheridito, Kawaguchi & Maejima (2003).
+
+    The fOU process is defined by the stochastic differential equation:
+
+    $$dX_t = \\theta(\\mu - X_t)dt + \\sigma dB^H_t$$
+
+    where:
+    - $\\theta$ is the mean-reversion speed
+    - $\\mu$ is the long-term mean
+    - $\\sigma$ is the volatility
+    - $B^H_t$ is fractional Brownian motion with Hurst parameter $H$
+
+    Properties:
+        - **H > 0.5**: Persistent memory, slower mean-reversion than standard OU
+        - **H = 0.5**: Reduces to standard OU process
+        - **H < 0.5**: Anti-persistent, faster mean-reversion
+
+    The process is stationary and mean-reverting, but unlike standard OU,
+    it exhibits long-range dependence when $H \\neq 0.5$.
 
     Args:
-        method: 'davies_harte' (fast) or 'cholesky' (exact)
+        n: Number of time steps.
+        H: Hurst parameter in (0, 1). Controls memory persistence.
+        theta: Mean-reversion speed. Higher values = faster reversion.
+        mu: Long-term mean level.
+        sigma: Volatility coefficient.
+        dt: Time step size.
+        size: Batch dimensions for multiple sample paths.
+        method: Generation method, either 'davies_harte' (fast) or 'cholesky' (exact).
+        device: Computation device ('cpu' or 'cuda').
+        dtype: Data type for tensors.
+        return_numpy: If True, returns NumPy array.
+
+    Returns:
+        Tensor of shape ``(*size, n+1)`` containing the simulated paths.
+
+    Example:
+        >>> # Simulate interest rate with memory
+        >>> rates = fractional_ou_process(
+        ...     n=1000, H=0.7, theta=0.1, mu=0.05, sigma=0.01
+        ... )
     """
-    # Safety Clamp
+    # Clamp H to valid range (0, 1)
     H = max(0.01, min(H, 0.99))
 
-    # Select Generator
     if method == "cholesky":
         gen_func = generate_cholesky
     else:
         gen_func = generate_davies_harte
 
-    # 1. Generate Fractional Gaussian Noise (Increments)
+    # Generate fGn and scale by dt^H
     fgn = gen_func(n, H, size, device=device, dtype=dtype, return_numpy=False)
-
-    # 2. Scale noise
-    # Standard scaling for fBm increments is dt^H
     noise_term = sigma * fgn * (dt**H)
 
-    # 3. Euler-Maruyama Integration
+    # Euler-Maruyama integration
     x = torch.zeros(*size, n + 1, device=device, dtype=dtype)
     x[..., 0] = mu  # Start at mean
 
     drift_factor = 1 - theta * dt
     drift_constant = theta * mu * dt
 
-    # Loop over time (cannot be easily vectorized due to recursive dependency)
     for t in range(n):
         x[..., t + 1] = x[..., t] * drift_factor + drift_constant + noise_term[..., t]
 
@@ -67,42 +118,71 @@ def geometric_fbm(
     dtype: torch.dtype = torch.float32,
     return_numpy: bool = False,
 ):
-    """
-    Simulates Geometric Fractional Brownian Motion (GFBm).
-    
-    Standard model for asset prices with long-range dependence.
-    Equation: S_t = S_0 * exp( (mu - 0.5*sigma^2)t + sigma * B_H(t) )
+    """Simulate Geometric Fractional Brownian Motion (GFBm).
+
+    Generalization of Geometric Brownian Motion with long-range dependence.
+    Based on the framework described in Rogers (1997).
+
+    The price follows:
+
+    $$S_t = S_0 \\exp\\left((\\mu - \\frac{1}{2}\\sigma^2)t + \\sigma B^H_t\\right)$$
+
+    where:
+    - $S_0$ is the initial price
+    - $\\mu$ is the drift (expected return)
+    - $\\sigma$ is the volatility
+    - $B^H_t$ is fractional Brownian motion
+
+    Note:
+        Unlike standard GBM, GFBm with $H \\neq 0.5$ admits arbitrage in
+        continuous time. However, it remains useful for modeling observed
+        market properties like volatility clustering and trend persistence.
+
+    Applications:
+        - **Finance**: Modeling assets with trending behavior ($H > 0.5$)
+        - **Volatility modeling**: Capturing long-memory in volatility
+        - **Risk analysis**: Fat-tailed return distributions
+
+    Args:
+        n: Number of time steps.
+        H: Hurst parameter in (0, 1).
+        mu: Drift coefficient (annualized return).
+        sigma: Volatility coefficient (annualized).
+        t_max: Total time horizon.
+        s0: Initial price.
+        size: Batch dimensions for multiple paths.
+        method: Generation method ('davies_harte' or 'cholesky').
+        device: Computation device.
+        dtype: Data type for tensors.
+        return_numpy: If True, returns NumPy array.
+
+    Returns:
+        Tensor of shape ``(*size, n+1)`` containing price paths.
+
+    Raises:
+        ValueError: If n <= 0.
+
+    Example:
+        >>> # Simulate 1 year of daily prices
+        >>> prices = geometric_fbm(
+        ...     n=252, H=0.6, mu=0.08, sigma=0.20, s0=100.0
+        ... )
     """
     if n <= 0:
         raise ValueError("n must be a positive integer")
 
     device = torch.device(device)
 
-    # Time grid
     t = torch.linspace(0, t_max, n + 1, device=device, dtype=dtype).expand(*size, n + 1)
 
-    # Generate standard fBm path B_H(t)
-    # We use the fbm() wrapper which handles H-clamping and method selection
-    # Note: fbm() returns shape (..., n+1) starting at 0
+    # Generate fBm path and scale to time horizon t_max
     fbm_path = fbm(
         n, H, size=size, method=method, device=device, dtype=dtype, return_numpy=False
     )
-
-    # Scale time horizon:
-    # The fbm() generator assumes T=n (unit steps). We need to scale to T=t_max.
-    # Scaling law: B(at) ~ a^H * B(t)
-    # So we scale by (dt)^H is handled implicitly if we view steps as dt?
-    # Actually, easier to just rescale the final path:
-    # The generated path reaches 'n'. We want it to reach 't_max'.
-    # Rescaling factor: (t_max / n)^H ??
-    # Let's stick to standard definition: B_H(t) has variance t^(2H).
-    # Our generated fbm_path has variance n^(2H) at the end.
-    # We want variance t_max^(2H).
-
     scale_factor = (t_max / n) ** H
     fbm_path = fbm_path * scale_factor
 
-    # Geometric formula
+    # Apply exponential transformation
     drift = (mu - 0.5 * sigma**2) * t
     diffusion = sigma * fbm_path
 
@@ -120,11 +200,23 @@ from .generators import fbm  # Ensure fbm is imported
 def _apply_reflection(
     path: torch.Tensor, increments: torch.Tensor, lower: float, upper: float
 ) -> torch.Tensor:
-    """
-    JIT-compiled loop to apply reflection boundaries efficiently.
-    X_{t+1} = X_t + dW_t
-    If X_{t+1} > Upper: Reflect down
-    If X_{t+1} < Lower: Reflect up
+    """Apply reflection boundaries via Skorokhod reflection map.
+
+    JIT-compiled loop for efficient boundary enforcement. When the process
+    exceeds a boundary, it reflects back into the domain.
+
+    Reflection rules:
+        - If $X_{t+1} > upper$: $X_{t+1} \\leftarrow 2 \\cdot upper - X_{t+1}$
+        - If $X_{t+1} < lower$: $X_{t+1} \\leftarrow 2 \\cdot lower - X_{t+1}$
+
+    Args:
+        path: Output tensor of shape ``(..., T+1)``, modified in-place.
+        increments: Increment tensor of shape ``(..., T)``.
+        lower: Lower reflection boundary.
+        upper: Upper reflection boundary.
+
+    Returns:
+        Modified path tensor with reflections applied.
     """
     # Create output tensor
     # increments shape: (..., T)
@@ -178,14 +270,51 @@ def reflected_fbm(
     device: str = "cpu",
     return_numpy: bool = False,
 ):
-    """
-    Simulates Reflected Fractional Brownian Motion (Bounded fBm) in [lower, upper].
-    Uses the Skorokhod reflection map via a JIT-compiled solver.
+    """Simulate Reflected Fractional Brownian Motion with barriers.
 
-    Useful for:
-    - Modeling pegged currencies (Target Zones).
-    - Particles in a confined box (Physics).
-    - Mean-reverting assets with hard support/resistance.
+    Based on the Skorokhod reflection map applied to fBm increments.
+
+    The process is constrained to the interval $[lower, upper]$ using
+    instantaneous reflection at the boundaries. This is a continuous-path
+    approximation of bounded diffusion.
+
+    Applications:
+        - **Target zone models**: Exchange rates within currency bands
+          (Krugman, 1991)
+        - **Physical systems**: Particles confined in a box
+        - **Finance**: Assets with hard support/resistance levels
+        - **Queueing theory**: Buffer capacities
+
+    Algorithm:
+        1. Generate free fBm increments
+        2. Apply reflection at each time step using the Skorokhod map
+        3. Use JIT compilation for efficiency
+
+    Args:
+        n: Number of time steps.
+        H: Hurst parameter in (0, 1).
+        lower: Lower reflection barrier.
+        upper: Upper reflection barrier.
+        mu: Drift coefficient.
+        sigma: Volatility coefficient.
+        t_max: Total time horizon.
+        start_val: Initial value (must be in [lower, upper]).
+        size: Batch dimensions.
+        method: Generation method ('davies_harte' or 'cholesky').
+        device: Computation device.
+        return_numpy: If True, returns NumPy array.
+
+    Returns:
+        Tensor of shape ``(*size, n+1)`` with paths bounded in [lower, upper].
+
+    Raises:
+        ValueError: If n <= 0.
+
+    Example:
+        >>> # Exchange rate in a target zone
+        >>> rate = reflected_fbm(
+        ...     n=1000, H=0.7, lower=1.0, upper=1.5, start_val=1.25
+        ... )
     """
     if n <= 0:
         raise ValueError("n must be a positive integer")
@@ -239,12 +368,45 @@ def fractional_brownian_bridge(
     device: str = "cpu",
     return_numpy: bool = False,
 ):
-    """
-    Simulates a Fractional Brownian Bridge.
-    A rough path that is conditioned to start at `start_val` and end at `end_val`.
+    """Simulate a Fractional Brownian Bridge.
 
-    Uses the "Fast Pinning" method:
-    X_bridge(t) = X_free(t) - (t/T) * (X_free(T) - target_displacement)
+    Generates fBm conditioned on fixed start and end values.
+    Based on the pinning method described in Norros, Valkeila & Virtamo (1999).
+
+    The bridge is constructed using linear correction of a free fBm path:
+
+    $$B^{H,bridge}_t = B^H_t - \\frac{t}{T}(B^H_T - (end - start)) + start$$
+
+    This produces a "rough" path (for $H < 0.5$) or "smooth" path (for $H > 0.5$)
+    that is pinned to specific boundary values.
+
+    Applications:
+        - **Finance**: Modeling prices with known future values (options at expiry)
+        - **Simulation**: Conditioning on observed endpoints
+        - **Interpolation**: Rough path interpolation between data points
+        - **Testing**: Generating paths with known boundary conditions
+
+    Args:
+        n: Number of time steps.
+        H: Hurst parameter in (0, 1).
+        start_val: Starting value $B^{H,bridge}_0$.
+        end_val: Ending value $B^{H,bridge}_T$.
+        t_max: Total time horizon $T$.
+        sigma: Volatility scaling.
+        size: Batch dimensions.
+        method: Generation method ('davies_harte' or 'cholesky').
+        device: Computation device.
+        return_numpy: If True, returns NumPy array.
+
+    Returns:
+        Tensor of shape ``(*size, n+1)`` with bridge paths.
+
+    Example:
+        >>> # Bridge from 0 to 1 with rough texture
+        >>> bridge = fractional_brownian_bridge(
+        ...     n=1000, H=0.3, start_val=0.0, end_val=1.0
+        ... )
+        >>> print(bridge[0, 0], bridge[0, -1])  # ~0.0, ~1.0
     """
     device = torch.device(device)
 
@@ -287,9 +449,44 @@ def fractional_brownian_bridge(
 
 
 def multifractal_random_walk(n, H, lambda_sq=0.02, device="cpu"):
-    """
-    Simulates MRW.
-    lambda_sq: Intermittency coefficient (higher = more flash crashes).
+    """Simulate a Multifractal Random Walk (MRW).
+
+    Based on Bacry, Delour & Muzy (2001).
+
+    The MRW combines fractional noise with stochastic volatility to produce
+    multifractal scaling:
+
+    $$X_t = \\sum_{i=1}^{t} \\sigma_i \\epsilon_i$$
+
+    where the volatility is:
+
+    $$\\sigma_t = \\exp(\\lambda^2 \\omega_t)$$
+
+    and $\\omega_t$ is fGn with Hurst parameter $H$, $\\epsilon_t$ is Gaussian noise.
+
+    The intermittency parameter $\\lambda^2$ controls the strength of
+    volatility clustering:
+    - $\\lambda^2 \\approx 0$: Nearly Gaussian returns
+    - $\\lambda^2 > 0$: Fat tails and volatility clustering
+    - Higher $\\lambda^2$: More extreme events ("flash crashes")
+
+    Properties:
+        - Multifractal spectrum depends on both $H$ and $\\lambda^2$
+        - Captures stylized facts of financial returns
+        - Long-memory in squared/absolute returns
+
+    Args:
+        n: Number of time steps.
+        H: Hurst parameter for the volatility process.
+        lambda_sq: Intermittency coefficient (controls tail fatness).
+        device: Computation device.
+
+    Returns:
+        Tensor of shape ``(n,)`` containing the MRW path.
+
+    Example:
+        >>> # Simulate returns with volatility clustering
+        >>> mrw = multifractal_random_walk(1000, H=0.7, lambda_sq=0.02)
     """
     # 1. Generate fGn for the volatility cone (omega)
     # The correlation of omega is logarithmic

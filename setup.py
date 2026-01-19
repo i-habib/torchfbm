@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="torchfbm",
-    version="0.2.1",
+    version="0.3.0",
     author="Ivan Habib",
     author_email="ivan.habib4@gmail.com",
     description="High-performance Fractional Brownian Motion toolkit for PyTorch with generators, processes, neural layers, and RL support",
