@@ -104,3 +104,10 @@ Streaming/online generation of fGn.
 Action noise for RL exploration.
 
 ::: torchfbm.rl
+
+## Utilities
+
+General utility functions for greater transparency and debugging.
+
+::: torchfbm.utils
+

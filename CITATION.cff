@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Habib"
+  given-names: "Ivan"
+  orcid: "https://orcid.org/0000-0002-7812-0371"
+title: "torchfbm: Differentiable Fractional Brownian Motion in PyTorch"
+version: 0.3.0
+date-released: 2026-01-22
+url: "https://github.com/i-habib/torchfbm"
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Habib"
+    given-names: "Ivan"
+  journal: "Journal of Open Source Software"
+  title: "torchfbm: A PyTorch Library for Differentiable Fractional Brownian Motion"
+  year: 2026
