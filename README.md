@@ -7,49 +7,44 @@
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://i-habib.github.io/torchfbm/)
 
-**`torchfbm`** is a high-performance, GPU-accelerated library for generating and analyzing Fractional Brownian Motion (fBm) and Fractional Gaussian Noise (fGn).
+`torchfbm` generates and analyzes fractional Brownian motion (fBm) and fractional Gaussian noise (fGn) in PyTorch. The generators run on CPU or GPU and are differentiable, so the Hurst parameter and the paths can sit inside a training loop.
 
-Designed for **Quantitative Finance** (Rough Volatility, Real-Time Streaming), **Deep Reinforcement Learning** (Regime-Aware Exploration), and **Generative Modeling** (Rough Diffusion), it provides differentiable generators and layers that seamlessly integrate into the PyTorch ecosystem.
+## What's included
 
----
+**Generators**
+- `fbm(..., method='davies_harte')`: FFT-based circulant embedding, O(N log N).
+- `fbm(..., method='cholesky')`: exact Cholesky factorization, O(N³), for checking the fast method.
+- `CachedFGNGenerator`: one new sample at a time by incremental Cholesky, O(N²) per step.
 
-##  Features
+**Processes**
+- `geometric_fbm`, `fractional_ou_process`, `multifractal_random_walk`
+- `reflected_fbm`, `fractional_brownian_bridge`
+- `fractional_diff` (fractional differencing)
 
-### **Core Generators**
-*   **Fast Generation:** Davies–Harte algorithm (FFT-based) for $O(N \log N)$ complexity.
-*   **Exact Generation:** Cholesky decomposition for $O(N^3)$ ground-truth validation.
-*   **Streaming ($O(N^2)$):** `CachedFGNGenerator` for real-time, online noise generation (Incremental Cholesky).
+**Estimation**
+- `estimate_hurst` (aggregated variance, differentiable)
+- `dfa` (detrended fluctuation analysis)
 
-### **Quantitative Finance**
-*   **Rough Processes:** `fractional_ou_process` (Fractional Ornstein-Uhlenbeck) for volatility modeling.
-*   **Asset Pricing:** `geometric_fbm` for simulating asset paths with long memory.
-*   **Multifractal Models:** `multifractal_random_walk` (MRW) for intermittent volatility and flash crashes.
-*   **Constraints:** `reflected_fbm` and `fractional_brownian_bridge` for boundary-constrained modeling and data imputation.
-*   **Stationarity:** `fractional_diff` (FracDiff) for making financial time series stationary while preserving memory.
-
-### **Deep Learning & Diffusion**
-*   **Noisy Layers:** `FBMNoisyLinear` for replacing standard weights with correlated noise.
-*   **Positional Embeddings:** `FractionalPositionalEmbedding` for Transformers on fractal data.
-*   **Diffusion Tools:** `SpectralConsistencyLoss` to enforce $1/f^\beta$ statistics and `HurstScheduler` for annealing roughness during sampling.
-*   **Neural SDEs:** `NeuralFSDE` solver with learnable Hurst parameters.
-
----
+**Neural network pieces**
+- `FBMNoisyLinear`: a noisy linear layer whose noise is fGn instead of white noise
+- `FractionalPositionalEmbedding`
+- `SpectralConsistencyLoss`: penalizes deviation from a 1/f^β power spectrum
+- `get_hurst_schedule`: a schedule for H across diffusion steps
+- `NeuralFSDE`: a neural SDE driven by fBm with a learnable H
 
 ## Install
 
-**From PyPI:**
+From PyPI:
 ```bash
 pip install torchfbm
 ```
 
-**For Development:**
+For development:
 ```bash
 git clone https://github.com/i-habib/torchfbm.git
-cd torch-fbm
+cd torchfbm
 pip install -e .
 ```
-
----
 
 ## Quick Usage
 
@@ -62,24 +57,24 @@ from torchfbm import fbm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Generate 4 paths of length 1024 with H=0.7 (Trending/Smooth)
+# 4 paths of length 1024 with H=0.7 (positively correlated increments)
 path = fbm(n=1024, H=0.7, size=(4,), method='davies_harte', device=device)
 ```
 
 ### 2. Real-Time Streaming (Online)
-Use `CachedFGNGenerator` for tick-by-tick simulation (e.g., Live Trading Environment).
+Use `CachedFGNGenerator` to draw one sample at a time.
 
 ```python
 from torchfbm.online import CachedFGNGenerator
 
-stream = CachedFGNGenerator(H=0.3, device=device) # H=0.3 (Rough/Mean Reverting)
+stream = CachedFGNGenerator(H=0.3, device=device)  # H < 0.5: negatively correlated increments
 
 for i in range(100):
-    val = stream.step() # Returns next point in O(N^2)
+    val = stream.step()
     print(f"Tick {i}: {val.item():.4f}")
 ```
 
-### 3. Deep Learning (Regime-Aware Layers)
+### 3. Noisy layers
 Replace standard `nn.Linear` with `FBMNoisyLinear`.
 
 ```python
@@ -88,19 +83,18 @@ from torchfbm import FBMNoisyLinear
 # Initialize layer with H=0.5 (Standard)
 layer = FBMNoisyLinear(32, 10, H=0.5, device=device)
 
-# Dynamic Regime Switching
-layer.H = 0.2  # Switch to Rough/Anti-correlated noise
+# change H and redraw the noise
+layer.H = 0.2
 layer.refresh_noise_stream()
 y = layer(torch.randn(8, 32, device=device))
 ```
 
-### 4. Generative Diffusion (Hurst Scheduling)
-Anneal the roughness of noise during the diffusion reverse process.
+### 4. Hurst schedules for diffusion
+Vary H across the reverse process.
 
 ```python
 from torchfbm.schedulers import get_hurst_schedule
 
-# Start rough (exploration), end smooth (refinement)
 hs = get_hurst_schedule(n_steps=1000, start_H=0.3, end_H=0.7, type='cosine')
 
 for t in reversed(range(1000)):
@@ -108,42 +102,34 @@ for t in reversed(range(1000)):
     # Use current_H for sampling noise...
 ```
 
-### 5. Financial Processes
-Simulate Geometric fBm (Stock Prices), Fractional OU (Volatility), and Multifractal Random Walk.
+### 5. Processes
 
 ```python
 from torchfbm import geometric_fbm, fractional_ou_process, multifractal_random_walk
 
-# Stock Price Simulation
 s = geometric_fbm(n=1000, H=0.7, mu=0.05, sigma=0.2, s0=100.0, device=device)
 
-# Multifractal Random Walk (Intermittent Volatility)
 mrw = multifractal_random_walk(n=1000, H=0.3, lambda_sq=0.02, device=device)
 ```
-
----
 
 ## Analysis Tools
 
 ```python
 from torchfbm import estimate_hurst, fractional_diff, dfa
 
-# Differentiable Hurst Estimation (Aggregated Variance Method)
+# aggregated-variance Hurst estimate (differentiable)
 H_est = estimate_hurst(path.unsqueeze(0), min_lag=4, max_lag=64)
 
-# Detrended Fluctuation Analysis (GPU-Accelerated)
+# detrended fluctuation analysis
 alpha = dfa(path, scales=None, order=1, return_alpha=True)
 
-# Fractional Differentiation (Stationarity + Memory)
+# fractional differencing
 stationary_ts = fractional_diff(path, d=0.4)
 ```
 
----
-
 ## Notes
 
-*   **Methods:** Use `method='davies_harte'` for large simulations. Use `method='cholesky'` for exact validation.
-*   **Stability:** $H$ is clamped to $[0.01, 0.99]$.
-*   **License:** MIT License.
-
-***
+- Use `method='davies_harte'` for long paths and `method='cholesky'` to check results exactly.
+- H is clamped to [0.01, 0.99].
+- Tests: `pytest torchfbm/tests` (511 tests).
+- MIT licensed.
